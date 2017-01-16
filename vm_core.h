@@ -704,8 +704,6 @@ typedef struct rb_thread_struct {
 
 		// add
 		int check;
-		int diff_sp;
-		VALUE *diff;
 		int flag_for_captured;
 		// end
 

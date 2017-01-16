@@ -54,7 +54,7 @@ mapping(size_t size)
   fd = open("/dev/zero",O_RDWR);
   // error handler
   if(fd == -1){
-    mem = malloc(size);
+    vm_stackoverflow();
   }
   else{
     mem = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
@@ -62,7 +62,7 @@ mapping(size_t size)
   }
   // error handle
   if(mem == MAP_FAILED){
-    mem = malloc(size);
+    vm_stackoverflow();
   }
   close(fd);
   return mem;
@@ -103,8 +103,6 @@ hoge(void *p)
   return buf + 7;
 }
 
-//#include <sys/mman.h>
-//#include <fcntl.h>
 static rb_control_frame_t *
 dummy(rb_control_frame_t *cfp, VALUE *sp, int margin, rb_thread_t *th,int local_size,const rb_iseq_t *iseq,
                   VALUE type,VALUE self,VALUE specval,VALUE cref_or_me,const VALUE *pc)
@@ -125,40 +123,27 @@ dummy(rb_control_frame_t *cfp, VALUE *sp, int margin, rb_thread_t *th,int local_
       // the amount of Extension
       size_t new_size = th->stack_size*2; //* count;
       size_t old_size = th->stack_size;// * (count-1);
-      //size_t diff = (size_t)((th->stack + old_size) - (size_t)cfp);
       rb_control_frame_t *cfp_base = (void *)(th->stack + old_size); // for first move
       rb_control_frame_t *cfp_move; // for first move
-      rb_control_frame_t *statement_of_end = (void *)(th->stack + old_size);
-      rb_control_frame_t *stock_cfp;
-      rb_control_frame_t *stock_cfp_base;
-      void *stack_start = (void *)th->stack;
-      void *stack_end = (void *)(th->stack + th->stack_size);
       void *new_stack_end;
       VALUE *sp_base;
       VALUE *sp_move;
       VALUE *stack_move_sp;
       VALUE diff_sp;
-      VALUE *tmp_cfp_base;
-      VALUE *tmp_cfp_move;
-      VALUE *tmp_sp_for_print;
       VALUE *for_finish;
-      int i;
       int j=0;
       VALUE *tmp_sp;
       VALUE *stack_for_mremap;
-      int count = count_cfp((void *)(th->stack + old_size),cfp);
       VALUE *new_sp_from_bottom;
-      size_t height_from_bottom = (size_t)(sp - th->stack);
-      size_t height_from_top = (size_t)(cfp_base - cfp);
-      rb_control_frame_t *cfp_height;
       VALUE *arg_sp = sp;
+      VALUE *sp_for_move;
 
-      printf("\n");
+      //printf("\n");
       // printf("th            :%p\n",th);
-      printf("th->stack     :%p\n",th->stack);
-      printf("stack end     :%p\n",(void *)((th->stack) + old_size));
-      printf("arg sp        :%p\n",sp);
-      printf("arg cfp       :%p\n",cfp);
+      // printf("th->stack     :%p\n",th->stack);
+      // printf("stack end     :%p\n",(void *)((th->stack) + old_size));
+      // printf("arg sp        :%p\n",sp);
+      // printf("arg cfp       :%p\n",cfp);
 
 #ifdef PRINT
       // for print
@@ -212,26 +197,35 @@ dummy(rb_control_frame_t *cfp, VALUE *sp, int margin, rb_thread_t *th,int local_
 
       // mapping for new stack
       stack_for_mremap = mapping(new_size);
-      new_stack_end = (void *)(stack_for_mremap + new_size);
-      stack_move_sp = stack_for_mremap;
+      //new_stack_end = (void *)(stack_for_mremap + new_size);
+      //stack_move_sp = stack_for_mremap;
       diff_sp = (th->stack - stack_for_mremap);
-      new_sp_from_bottom = sp - diff_sp;
+      //th->diff = (void *)diff_sp;
+      //new_sp_from_bottom = sp - diff_sp;
       sp_base = th->stack;
+
 
       //cfp_height = (void *)(stack_for_mremap + new_size);
       cfp_move = (void *)(stack_for_mremap + new_size);
       cfp_base = (void *)(th->stack + old_size);
 
-      for(int i=0;i<count;i++){
-        cfp_move--;
-      }
+      // for(int i=0;i<count;i++){
+      //   cfp_move--;
+      // }
 
-      // move stack
-      // top
-      memcpy(cfp_move,cfp,(sizeof(rb_control_frame_t *)*count+1));
+
+      //move stack
+      //top
+      //memcpy(cfp_move,cfp,(sizeof(rb_control_frame_t *)*count+1));
       // bottom
-      memcpy(stack_for_mremap,sp_base,height_from_bottom);
-      // move end
+      //count = 0;
+      //sp_for_move = (void *)th->stack;
+      //while(sp_for_move <= (VALUE *)cfp){
+      //  count++;
+      //  sp_for_move++;
+      //}
+      //memcpy(stack_for_mremap,sp_base,sizeof(VALUE *)*count);
+      //move end
 
       sp_base = (void *)th->stack;
       sp_move = stack_for_mremap;
@@ -240,8 +234,6 @@ dummy(rb_control_frame_t *cfp, VALUE *sp, int margin, rb_thread_t *th,int local_
       tmp_sp = (void *)th->stack;
 
       while(cfp_base > cfp){
-        // printf("&sp       : %p\n",&cfp_base->sp);
-        // printf("cfp_base  : %p\n",cfp_base);
         j=0;
         *cfp_move = *cfp_base;
         for_finish = cfp_base->sp;
@@ -259,18 +251,10 @@ dummy(rb_control_frame_t *cfp, VALUE *sp, int margin, rb_thread_t *th,int local_
           cfp_base->sp += j;
           cfp_move->sp += j;
         }
-        if(cfp_base->ep == NULL || cfp_base->ep <= (VALUE *)0x700000000000){
-          cfp_move->ep = cfp_base->ep;
-          if(cfp_base->ep == NULL) cfp_move->ep = NULL;
+        if(cfp_base->ep == NULL){
+          cfp_move->ep = NULL;
         }else{
           cfp_move->ep = cfp_base->ep - diff_sp;
-          *cfp_move->ep = *cfp_base->ep;
-          cfp_move->ep[VM_ENV_DATA_INDEX_SPECVAL] -= ((int)diff_sp*8);
-          // cfp_move->ep[VM_ENV_DATA_INDEX_ME_CREF] = cfp_base->ep[VM_ENV_DATA_INDEX_ME_CREF];
-          // cfp_move->ep[VM_ENV_DATA_INDEX_SPECVAL] = cfp_base->ep[VM_ENV_DATA_INDEX_SPECVAL];
-          // cfp_move->ep[VM_ENV_DATA_INDEX_FLAGS] = cfp_base->ep[VM_ENV_DATA_INDEX_FLAGS];
-          // cfp_move->ep[VM_ENV_DATA_INDEX_ENV] = cfp_base->ep[VM_ENV_DATA_INDEX_ENV];
-          // cfp_move->ep[VM_ENV_DATA_INDEX_ENV_PROC] = cfp_base->ep[VM_ENV_DATA_INDEX_ENV_PROC];
         }
         cfp_move--;
         cfp_base--;
@@ -356,7 +340,7 @@ dummy(rb_control_frame_t *cfp, VALUE *sp, int margin, rb_thread_t *th,int local_
       cfp_move->block_code = NULL;
 
       /* initialize local variables */
-      for (i=0; i < local_size; i++) {
+      for (int i=0; i < local_size; i++) {
         *sp++ = Qnil;
       }
       /* setup ep with managing data */
@@ -369,25 +353,25 @@ dummy(rb_control_frame_t *cfp, VALUE *sp, int margin, rb_thread_t *th,int local_
       *sp = type;       /* ep[-0] / ENV_FLAGS */
 
       cfp_move->ep = sp;
-      cfp_move->ep[-1] -= ((int)diff_sp*8);
       cfp_move->sp = sp + 1;
 
       // 元領域の保護
-      mprotect(th->stack,th->stack_size,PROT_NONE);
+      //mprotect(th->stack,th->stack_size,PROT_NONE);
+      //munmap(th->stack,th->stack_size);
+      free(th->stack);
 
-      printf("new\n");
-      printf("restack       :%p\n",stack_for_mremap);
-      printf("end           :%p\n",(void *)((stack_for_mremap) + new_size));
-      printf("return cfp    :%p\n",cfp_move);
-      fflush(stdout);
+      // printf("new\n");
+      // printf("restack       :%p\n",stack_for_mremap);
+      // printf("end           :%p\n",(void *)((stack_for_mremap) + new_size));
+      // printf("return cfp    :%p\n",cfp_move);
+      printf("succcc!!!!!\n");
       th->check = 2;
-      th->diff_sp = diff_sp;
       th->flag_for_captured = 2;
       return cfp_move;//th->cfp;
     }
   }
   vm_stackoverflow();
-  return cfp;
+  return 0;
 }
 
 #if VM_CHECK_MODE > 0
@@ -2172,6 +2156,11 @@ vm_call_cfunc_with_frame(rb_thread_t *th, rb_control_frame_t *reg_cfp, struct rb
 		  0, th->cfp->sp, 0, 0);
 
     if (len >= 0) rb_check_arity(argc, len, len);
+    if(th->flag_for_captured == 2){
+      th->cfp++;
+      reg_cfp = th->cfp;
+      th->cfp--;
+    }
 
     reg_cfp->sp -= argc + 1;
 
